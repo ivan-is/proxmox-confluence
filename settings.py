@@ -10,16 +10,18 @@ PROXMOX_PORT = ''
 PROXMOX_USER = ''
 PROXMOX_PASS = ''
 
+# page settings
+PAGEID = ''
+PAGE_TITLE = ''
+
 # confluence
-CONFL_URL = ''
 CONFL_HOST = ''
 CONFL_PORT = ''
 CONFL_USER = ''
 CONFL_PASS = ''
-
-PAGEID = ''
-# file with number of last version page
-PAGEID_FNAME = ''
+CONFL_URL = 'http://{host}:{port}/rest/api/content/{page_id}'.format(host=CONFL_HOST,
+                                                                     port=CONFL_PORT,
+                                                                     page_id=PAGEID)
 
 
 try:

@@ -3,7 +3,7 @@ import logging
 
 from logger import setup_logger
 from proxmox import Proxmox
-from formatter import HtmlFormatter
+from confluence import ConfluenceClient
 
 
 setup_logger()
@@ -12,14 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 if __name__ == '__main__':
-    import pprint
-
-    pp = pprint.PrettyPrinter(indent=4)
-    formatter = HtmlFormatter()
     proxmox = Proxmox()
+    client = ConfluenceClient()
     results = proxmox.get_stats()
-    table = formatter.get_table(results)
-    # dict(vm._asdict())
-    # pp.pprint(results)
-    print(table)
-
+    client.put_results(results)
+    client.close()

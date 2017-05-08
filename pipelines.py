@@ -1,7 +1,11 @@
+import logging
 from html import HTML
 
 
-class HtmlFormatter(object):
+logger = logging.getLogger(__name__)
+
+
+class HtmlPipeline(object):
 
     def __init__(self):
         self._html = HTML()
@@ -57,11 +61,60 @@ class HtmlFormatter(object):
                     tr.td(resources, newlines=True, escape=False)
                     tr.td('None', newlines=True, escape=False)
 
-    def get_table(self, vms):
-        with self._html.table(style="width:88.4384%;"
-                              "padding:0px") as table:
+    def process_items(self, vms):
+        with self._html.table(border='1',
+                              style="width:88.4384%;" "padding:0px") as table:
             self.setup_colgroup(table)
             self.setup_thead(table)
             self.make_tbody(table, vms)
 
         return table
+
+
+class WikiPipeline(object):
+
+    def __init__(self):
+        self._template = """{json-table:
+                            output=wiki|
+                            paths=$|
+                            autoNumber=true}
+                            %s
+                            {json-table}"""
+
+    @staticmethod
+    def node_as_str(node):
+        ram_str = '{}GB/{}GB'.format(node.mem_used,
+                                     node.mem_total)
+        hdd_str = '{}GB/{}GB'.format(node.hdd_used,
+                                     node.hdd_total)
+
+        return 'Name: *{}*\nCPU: {}\nRAM: {}\n' \
+               'HDD: {}'.format(node.name, node.cpu, ram_str, hdd_str)
+
+    @staticmethod
+    def resources_as_str(vm):
+        return '{}CPU/{}GB/{}GB'.format(vm.cpu, vm.mem, vm.hdd)
+
+    @staticmethod
+    def vm_as_str(vm):
+        return '{} ({})'.format(vm.vmid, vm.name)
+
+    def process_items(self, items):
+        nodes = []
+        try:
+            for node_name, data in items.items():
+                node = self.node_as_str(data['node_resources'])
+                vms = [self.vm_as_str(vm) for vm in data['vms']]
+                resources = [self.resources_as_str(vm) for vm in data['vms']]
+                node = {
+                    'node': node,
+                    'resources': '\n'.join(resources),
+                    'VMs': '\n'.join(vms)
+                }
+                nodes.append(node)
+
+        except Exception as e:
+            logger.critical('"{}" while processing items'.format(e))
+
+        else:
+            return self._template % nodes

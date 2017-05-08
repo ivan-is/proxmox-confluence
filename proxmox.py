@@ -2,6 +2,7 @@ import logging
 from collections import namedtuple
 
 from requests import ConnectionError
+from pipelines import WikiPipeline as Pipe
 from proxmoxer import ProxmoxAPI
 from settings import PROXMOX_HOST, PROXMOX_USER, PROXMOX_PASS
 
@@ -20,6 +21,9 @@ class Proxmox(object):
 
     # proxmox connection
     _conn = None
+
+    # json pipe
+    _pipe = Pipe()
 
     def __init__(self):
         # trying to setup connection
@@ -117,7 +121,7 @@ class Proxmox(object):
                 if node:
                     logger.debug('found node: "{}"'.format(node.name))
                     results.setdefault(node.name, {})
-                    results[node.name]['stats'] = node
+                    results[node.name]['node_resources'] = node
 
-        return results
+        return self._pipe.process_items(results)
 
