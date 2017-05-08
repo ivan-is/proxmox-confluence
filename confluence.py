@@ -1,68 +1,96 @@
-from __future__ import print_function
 import logging
+from contextlib import closing
+import json
 
-from logger import setup_logger
-from proxmox import Proxmox
+from requests import Session
+from requests.adapters import HTTPAdapter
+from requests.exceptions import ConnectionError, Timeout, RetryError
+from settings import (CONFL_URL, PAGE_TITLE, PAGEID,
+                      CONFL_USER, CONFL_PASS)
 
-from html import HTML
-from proxmoxer import ProxmoxAPI
-import settings
-
-
-setup_logger()
-logging.getLogger("proxmoxer.core").setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
-def get_proxmox_conn():
-    return ProxmoxAPI(host=settings.PROXMOX_HOST,
-                      user='{}@pam'.format(settings.PROXMOX_USER),
-                      password=settings.PROXMOX_PASS,
-                      verify_ssl=False)
+class ConfluenceClient(object):
 
+    # http session
+    _session = None
 
-def get_vm(vm):
-    if vm.get('name'):
-        return {
-            'maxdisk': vm.get('maxdisk', 0),
-            'maxmem': vm.get('maxmem', 0),
-            'maxcpu': vm.get('maxcpu', 0),
-            'name': vm['name'],
-            'status': vm['status'],
-            'type': vm.get('type')
+    # http timeouts, sec
+    conn_timeout = 5
+    read_timeout = 15
+
+    # http headers
+    HEADERS = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+
+    def __init__(self):
+        self.setup_session()
+
+    def setup_session(self):
+        """setup http session"""
+
+        adapter = HTTPAdapter(max_retries=10,
+                              pool_block=False)
+        session = Session()
+        session.mount('https://', adapter)
+        session.mount('http://', adapter)
+        session.verify = False
+        self._session = session
+
+    @staticmethod
+    def request_data(page_version, table):
+        params = {
+            "id": PAGEID,
+            "type": "page",
+            "title": PAGE_TITLE,
+            "body": {"storage": {"value": table,
+                                 "representation": "wiki"}
+                     },
+            "version": {"number": page_version}
         }
+        return json.dumps(params, ensure_ascii=False)
 
+    def _request(self, method='GET',
+                 max_retries=3, data=None):
+        attempt = 0
+        timeouts = (self.conn_timeout, self.read_timeout)
+        while attempt < max_retries:
+            try:  # fetch response
+                request = getattr(self._session, method.lower())
+                with closing(request(url=CONFL_URL,
+                                     data=data,
+                                     headers=self.HEADERS,
+                                     auth=(CONFL_USER, CONFL_PASS),
+                                     timeout=timeouts)) as response:
+                    if response.status_code == 200:
+                        logger.debug('successfully posted the article')
+                        return response.content
 
-def get_vms(proxmox):
-    results = {}
-    vms = proxmox.cluster.resources.get(type='vm')
-    for vm in vms:
-        node = vm['node']
-        results.setdefault(node, [])
-        vm = get_vm(vm)
-        if vm:
-            results[node].append(vm)
+                    response.raise_for_status()
 
-    return results
+            except (ConnectionError,
+                    Timeout, RetryError):
+                pass
 
+            except Exception as e:
+                logger.error('"{}" ("{}") while "{}" response'.format(e, type(e), method))
 
-def get_table(vms):
-    html = HTML()
-    table = html.table(border='1')
-    b = table.tbody(newlines=True)
-    for vm in vms:
-        r = b.tr(newlines=True)
-        r.td('column 1')
-        r.td('column 2')
-    print(table)
+            attempt += 1
 
+    def _current_page_version(self):
+        content = self._request()
+        if content is not None:
+            content = json.loads(content)
+            return content['version']['number']
 
-if __name__ == '__main__':
-    import pprint
+    def put_results(self, results):
+        page_version = self._current_page_version()
+        logger.debug('current page version: {}'.format(page_version))
+        data = self.request_data(page_version=page_version+1,
+                                 table=results)
+        self._request(method='PUT',
+                      data=data)
 
-    pp = pprint.PrettyPrinter(indent=4)
-    proxmox = Proxmox()
-    results = proxmox.get_stats()
-    # dict(vm._asdict())
-    pp.pprint(results)
-
+    def close(self):
+        if self._session is not None:
+            self._session.close()
