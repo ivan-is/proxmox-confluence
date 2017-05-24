@@ -75,6 +75,7 @@ class WikiPipeline(object):
 
     def __init__(self):
         self._template = """{json-table:
+                            fieldPaths=node,VMs,resources|
                             output=wiki|
                             paths=$|
                             autoNumber=true}
@@ -103,18 +104,19 @@ class WikiPipeline(object):
         nodes = []
         try:
             for node_name, data in items.items():
-                node = self.node_as_str(data['node_resources'])
-                vms = [self.vm_as_str(vm) for vm in data['vms']]
-                resources = [self.resources_as_str(vm) for vm in data['vms']]
-                node = {
-                    'node': node,
-                    'resources': '\n'.join(resources),
-                    'VMs': '\n'.join(vms)
-                }
-                nodes.append(node)
+                node = self.node_as_str(data.get('node_resources'))
+                if node:
+                    vms = [self.vm_as_str(vm) for vm in data.get('vms', [])]
+                    resources = [self.resources_as_str(vm) for vm in data.get('vms', [])]
+                    node = {
+                        'node': node,
+                        'resources': '\n'.join(resources),
+                        'VMs': '\n'.join(vms)
+                    }
+                    nodes.append(node)
 
         except Exception as e:
-            logger.critical('"{}" while processing items'.format(e))
+            logger.critical('"{}" while processing items'.format(e), exc_info=True)
 
         else:
             return self._template % nodes
