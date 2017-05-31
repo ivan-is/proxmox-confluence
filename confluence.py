@@ -21,7 +21,10 @@ class ConfluenceClient(object):
     read_timeout = 15
 
     # http headers
-    HEADERS = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+    HEADERS = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+    }
 
     def __init__(self):
         self.setup_session()
@@ -86,10 +89,13 @@ class ConfluenceClient(object):
     def put_results(self, results):
         page_version = self._current_page_version()
         logger.debug('current page version: {}'.format(page_version))
-        data = self.request_data(page_version=page_version+1,
-                                 table=results)
-        self._request(method='PUT',
-                      data=data)
+        if page_version:
+            data = self.request_data(page_version=page_version+1,
+                                     table=results)
+            self._request(method='PUT',
+                          data=data)
+        else:
+            logger.error('could not get page version')
 
     def close(self):
         if self._session is not None:

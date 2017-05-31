@@ -75,7 +75,7 @@ class WikiPipeline(object):
 
     def __init__(self):
         self._template = """{json-table:
-                            fieldPaths=node,VMs,resources|
+                            fieldPaths=node,VMs,resources,description|
                             output=wiki|
                             paths=$|
                             autoNumber=true}
@@ -86,11 +86,19 @@ class WikiPipeline(object):
     def node_as_str(node):
         ram_str = '{}GB/{}GB'.format(node.mem_used,
                                      node.mem_total)
-        hdd_str = '{}GB/{}GB'.format(node.hdd_used,
-                                     node.hdd_total)
+        root_hdd_str = '{}GB/{}GB'.format(node.root_hdd_used,
+                                          node.root_hdd_total)
+        local_hdd_str = 'Total: {} GB\nAvailable: {} GB'.format(node.local_total,
+                                                                node.local_available)
 
         return 'Name: *{}*\nCPU: {}\nRAM: {}\n' \
-               'HDD: {}'.format(node.name, node.cpu, ram_str, hdd_str)
+               'Root HDD: {}\n' \
+               '*Local storage*: \n{}'.format(node.name, node.cpu, ram_str,
+                                              root_hdd_str, local_hdd_str)
+
+    @staticmethod
+    def state_as_str(vm):
+        return '{}'.format(vm.state)
 
     @staticmethod
     def resources_as_str(vm):
@@ -99,6 +107,18 @@ class WikiPipeline(object):
     @staticmethod
     def vm_as_str(vm):
         return '{} ({})'.format(vm.vmid, vm.name)
+        # return '{} ({}) {}'.format(vm.vmid, vm.name, vm.state)
+
+    @staticmethod
+    def _strip_text(text, strip_len=18):
+        if not text:
+            text = '--'
+        else:
+            if text and not isinstance(text, unicode):
+                text = text.decode('utf-8')
+            text = text.encode('utf-8')[:strip_len].strip()
+            text = ' '.join(text.split()) + '...' if text else 'None'
+        return text
 
     def process_items(self, items):
         nodes = []
@@ -108,10 +128,12 @@ class WikiPipeline(object):
                 if node:
                     vms = [self.vm_as_str(vm) for vm in data.get('vms', [])]
                     resources = [self.resources_as_str(vm) for vm in data.get('vms', [])]
+                    descr = [self._strip_text(vm.description) for vm in data.get('vms', [])]
                     node = {
                         'node': node,
                         'resources': '\n'.join(resources),
-                        'VMs': '\n'.join(vms)
+                        'VMs': '\n'.join(vms),
+                        'description': '\n'.join(descr)
                     }
                     nodes.append(node)
 
