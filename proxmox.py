@@ -6,15 +6,15 @@ from pipelines import WikiPipeline as Pipe
 from proxmoxer import ProxmoxAPI
 from settings import PROXMOX_HOST, PROXMOX_USER, PROXMOX_PASS
 
-
 logger = logging.getLogger(__name__)
 
 # nodes and VMs models
 Node = namedtuple('Node', ['mem_used', 'mem_total', 'cpu',
-                           'hdd_used', 'hdd_total', 'name'])
+                           'root_hdd_used', 'root_hdd_total',
+                           'name', 'local_total', 'local_available'])
 
-VM = namedtuple('VM', ['mem', 'hdd', 'cpu', 'name',
-                       'status', 'vmid', 'node'])
+VM = namedtuple('VM', ['mem', 'hdd', 'cpu', 'name', 'uptime',
+                       'state', 'vmid', 'node', 'description'])
 
 
 class Proxmox(object):
@@ -52,10 +52,12 @@ class Proxmox(object):
             return VM(name=vm['name'],
                       hdd=hdd,
                       mem=mem,
+                      uptime=self._sec_to_days(vm['uptime']),
                       cpu=vm.get('maxcpu', 0),
                       vmid=vm['vmid'],
+                      description=vm['description'],
                       node=vm['node'],
-                      status=vm['status'])
+                      state=vm['status'])
 
     def _get_node(self, node):
         """combine Node model structure"""
@@ -65,16 +67,22 @@ class Proxmox(object):
             node.get('mem', 0))
         mem_total = self._bytes_to_gb(
             node.get('maxmem', 0))
-        hdd_used = self._bytes_to_gb(
+        root_hdd_used = self._bytes_to_gb(
             node.get('disk', 0))
-        hdd_total = self._bytes_to_gb(
+        root_hdd_total = self._bytes_to_gb(
             node.get('maxdisk', 0))
+        local_total = self._bytes_to_gb(
+            node.get('local_total', 0))
+        local_avail = self._bytes_to_gb(
+            node.get('local_avail', 0))
 
         return Node(name=node['node'],
                     mem_used=mem_used,
                     mem_total=mem_total,
-                    hdd_used=hdd_used,
-                    hdd_total=hdd_total,
+                    root_hdd_used=root_hdd_used,
+                    root_hdd_total=root_hdd_total,
+                    local_total=local_total,
+                    local_available=local_avail,
                     cpu=node.get('maxcpu', 0))
 
     @staticmethod
@@ -87,11 +95,35 @@ class Proxmox(object):
         except TypeError:
             return 0
 
+    @staticmethod
+    def _sec_to_days(sec):
+        return int(sec / 86400.0)
+
     def _get_resources(self):
         try:
             return self._conn.cluster.resources.get()
         except Exception as e:
             logger.error('"{}" while getting resources'.format(e))
+
+    def _vm_config(self, node, vmid):
+        if node and vmid:
+            url = '{}/qemu/{}/config'.format(node, vmid)
+            vm = self._conn.nodes(url).get()
+            descr = vm.get('description')
+            if descr and not isinstance(descr, unicode):
+                descr = descr.decode('utf-8')
+            return {
+                'description': descr or u''
+            }
+
+    def _node_config(self, node):
+        if node:
+            url = '{}/storage/local/status'.format(node)
+            data = self._conn.nodes(url).get()
+            return {
+                'local_total': data.get('total', 0),
+                'local_avail': data.get('avail', 0),
+            }
 
     def get_stats(self):
         """get stats (VMs and nodes resources)"""
@@ -109,19 +141,25 @@ class Proxmox(object):
         # extract nodes and VMs from list of resources
         for item in resources or []:
             if item.get('vmid'):  # VM found (let's assume that only VM has 'vmid' attribute)
-                vm = self._get_vm(item)
-                if vm:
-                    logger.debug('found "{}" VM from "{}" node'.format(vm.name, vm.node))
-                    results.setdefault(vm.node, {})
-                    results[vm.node].setdefault('vms', [])
-                    results[vm.node]['vms'].append(vm)
+                additional_data = self._vm_config(item['node'], item['vmid'])
+                if additional_data:
+                    item.update(additional_data)
+                    vm = self._get_vm(item)
+                    if vm:
+                        logger.debug('found "{}" VM from "{}" node'.format(vm.name, vm.node))
+                        results.setdefault(vm.node, {})
+                        results[vm.node].setdefault('vms', [])
+                        results[vm.node]['vms'].append(vm)
 
             elif item.get('type') == 'node':  # node found
-                node = self._get_node(item)
-                if node:
-                    logger.debug('found node: "{}"'.format(node.name))
-                    results.setdefault(node.name, {})
-                    results[node.name]['node_resources'] = node
+                additional_data = self._node_config(item['node'])
+                if additional_data:
+                    item.update(additional_data)
+                    node = self._get_node(item)
+                    if node:
+                        logger.debug('found node: "{}"'.format(node.name))
+                        results.setdefault(node.name, {})
+                        results[node.name]['node_resources'] = node
 
         return self._pipe.process_items(results)
 
